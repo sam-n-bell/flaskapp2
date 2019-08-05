@@ -3,9 +3,11 @@ import config
 from flask import current_app, Flask, redirect, url_for, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
+from flask_cors import CORS
 
 
 app = Flask(__name__)
+CORS(app)
 app.config.from_object(config)
 db = SQLAlchemy(app)
 
