@@ -1,34 +1,49 @@
 import config
 
-from flask import current_app, Flask, redirect, url_for, jsonify
+from flask import current_app, Flask, redirect, url_for, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 
-import socket
-
-# app = bookshelf.create_app(config)
 
 app = Flask(__name__)
 app.config.from_object(config)
-print(app)
 db = SQLAlchemy(app)
 
 
-@app.route("/")
+@app.route("/", methods=['GET'])
 def index():
-    # results = db.session.execute('SELECT * FROM users')
-    # print(results)
-    # host_name = socket.gethostname()
-    # host_ip = socket.gethostbyname(host_name)
-    # print("Hostname :  ", host_name)
-    # print("IP : ", host_ip)
-    return jsonify({"name": "sam"})
+    return jsonify({"Events Platform v1": "APAD Project - Sasha Opela & Sam Bell"})
 
-    # return redirect(url_for('crud.list'))
+
+@app.route("/users", methods=['GET', 'POST'])
+def get_users():
+    if request.method == 'GET':
+        query = db.session.execute('SELECT * FROM users')
+        results = query.fetchall()  # returns a list
+        results_dicts = []
+        for r in results:
+            results_dicts.append(dict(r))
+        return jsonify(results_dicts)
+    else:
+        return jsonify({"message": "post"})
+
+
+@app.route("/venues", methods=['GET', 'POST'])
+def get_venues():
+    if request.method == 'GET':
+        query = db.session.execute('SELECT * FROM venues')
+        results = query.fetchall()  # returns a list
+        results_dicts = []
+        for r in results:
+            results_dicts.append(dict(r))
+        return jsonify(results_dicts)
+    else:
+        return jsonify({"message": "post"})
+
+
 
 # Add an error handler. This is useful for debugging the live application,
 # however, you should disable the output of the exception for production
 # applications.
-
 
 # @app.errorhandler(500)
 # def server_error(e):
