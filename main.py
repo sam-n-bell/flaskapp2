@@ -130,7 +130,22 @@ def get_events(venueId):
         events = []
         events_dict=[]
         if time != None:
-        query = db.session.execute("SELECT e.*, v.name as venue_name, count(distinct p.participant_id) +sum(p.num_guests) as total FROM events e LEFT JOIN venues v ON v.venue_id = e.venue_id ")
+            query = db.session.execute("SELECT e.*, v.name as venue_name, count(distinct p.participant_id) +sum(p.num_guests) as total FROM events e LEFT JOIN venues v ON v.venue_id = e.venue_id LEFT JOIN participants p on p.event_id = e.event_id WHERE e.start_time :time AND e.event_day : day and e.venue_id : venueId",
+            {'time': time, 'day': day, 'venueId': venueId})
+            events = query.fetchall()
+        else
+            query = db.session.execute("SELECT e.*, v.name as venue_name, count(distinct p.participant_id) +sum(p.num_guests) as total FROM events e LEFT JOIN venues v ON v.venue_id = e.venue_id LEFT JOIN participants p on p.event_id = e.event_id WHERE e.event_day : day and e.venue_id : venueId GROUP BY e.event_id",
+            {'day': day, 'venueId': venueId})
+            events = query.fetchall()
+            
+        if (len(events) > 0 and events[0]['event_id'] != None):
+        events_dict = [{'event_id': e['event_id'],
+                        'venue': e['venue_name'], 
+                        'starts': e['start_time'],
+                        'name': e['name'], 
+                        'max_players': e['max_players'],
+                        'total': e['total']} 
+                       for e in events]
         return jsonify(results_dicts)
     except Exception as e:
         return jsonify({"message:" "Error getting event"}), 500
