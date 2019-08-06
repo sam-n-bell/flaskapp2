@@ -3,6 +3,7 @@ import jwt
 from jwt.contrib.algorithms.pycrypto import RSAAlgorithm
 from jwt.contrib.algorithms.py_ecdsa import ECAlgorithm
 
+# comment these two lines out for deploying on Google
 # jwt.unregister_algorithm('RS256')
 # jwt.unregister_algorithm('ES256')
 
@@ -16,13 +17,8 @@ def create_token(user_dict):
 
 
 def decode_token(header):
-    if header.split(' ')[0] != 'Authorization':
+    print(header)
+    if header.split(' ')[0] != 'Bearer':
         raise Exception('Auth header needed')
     decoded = jwt.decode(header.split(' ')[1], 'secret')
     return decoded
-
-
-def is_authenticated(header):
-    print(header.split(' ')[1])
-    is_valid(header.split(' ')[1])
-    # return decode_token(header.split(' ')[1])

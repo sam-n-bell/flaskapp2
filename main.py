@@ -19,6 +19,45 @@ def index():
     return jsonify({"Events Platform v1": "APAD Project - Sasha Opela & Sam Bell"})
 
 
+def email_pass_validation(email, password):
+    email = email.lower()
+    query = db.session.execute("SELECT * FROM users WHERE lower(email) = :email", {'email': email})
+    user = dict(query.fetchone())
+    if user['password'] == password and user['email'] == email:
+        return user
+    else:
+        raise Exception('Invalid login')
+
+
+def store_token(user, token):
+    expires = datetime.date.today() + datetime.timedelta(days=1)
+    db.session.execute(
+        "INSERT INTO user_tokens (user_id, token, expires) VALUES (:user_id, :token, :expires);",
+        {'user_id': user['user_id'], 'token': token, 'expires': expires})
+    db.session.commit()
+
+
+def validate_token(header):
+    query = db.session.execute("SELECT ut.* FROM user_tokens ut WHERE ut.token = :token ORDER BY ut.date_created DESC LIMIT 1", {'token': header.split(' ')[1]})
+    token_dict = dict(query.fetchone())
+    if token_dict['expires'] < datetime.date.today():
+        raise Exception('Expired token')
+    decoded = auth.decode_token(header)
+    return decoded  # user dict
+
+
+@app.route("/<venueId>/availability", methods=['POST'])
+def get_venue_availability(venueId):
+    try:
+        #  venueId is from the URL
+        user = validate_token(request.headers.get('Authorization'))
+
+        query = db.session.execute("", {'event_id': eventId})
+        event = dict(query.fetchone())
+        return jsonify({'eventid': "blank"})
+    except Exception as e:
+        return jsonify({'message': "An error occured joining event"}), 500
+
 @app.route("/login", methods=['POST'])
 def create_token():
     try:
@@ -48,12 +87,8 @@ def get_users():
 def add_user():
     try:
             content = request.json # turns the json request body into a dict :D
-            name = content['name']
-            email = content['email']
-            password = content['password']
-            administrator = content['administrator']
             query = db.session.execute("INSERT INTO users (name, email, password, administrator) VALUES (:name, :email, :password, :administrator);",
-                               {'name': name, 'email': email, 'password': password, 'administrator': administrator})
+                               {'name': content['name'], 'email': content['email'], 'password': content['password'], 'administrator': content['administrator']})
             # print(query.lastrowid) # returns last id
             db.session.commit()
             return jsonify({"message": "User Added"}), 201  # returns a 201 status code with a message
@@ -74,7 +109,11 @@ def get_venues():
 @app.route("/venues", methods=['POST'])
 def create_venue():
     try:
-        pass
+        content = request.json
+        db.session.execute("INSERT INTO venues (name, address, activities) VALUES (:name, :address, :activities",
+                          {'name': content['name'], 'address': content['address'], 'activities': content['activities']})
+        db.session.commit()
+        return jsonify({"message": "Venue Added"}), 201  # returns a 201 status code with a message
     except Exception as e:
         return jsonify({"message": "Error adding venue"}), 500
 
@@ -100,23 +139,19 @@ def create_event():
     except Exception as e:
         return jsonify({"message": "Error adding venue"}), 500
 
+@app.route("/<eventId>/join", methods=['POST'])
+def join_event(eventId):
+    try:
+        # eventId is from the URL
+        #
+        user = validate_token(request.headers.get('Authorization'))
 
-def email_pass_validation(email, password):
-    email = email.lower()
-    query = db.session.execute("SELECT * FROM users WHERE lower(email) = :email", {'email': email})
-    user = dict(query.fetchone())
-    if user['password'] == password and user['email'] == email:
-        return user
-    else:
-        raise Exception('Invalid login')
+        query = db.session.execute("SELECT e.*, (COUNT(distinct p.user_id) + SUM(p.num_guests)) AS num_players FROM events e LEFT JOIN participants p on p.event_id = e.event_id WHERE e.event_id = :event_id", {'event_id': eventId})
+        event = dict(query.fetchone())
+        return jsonify({'eventid': eventId})
+    except Exception as e:
+        return jsonify({'message': "An error occured joining event"}), 500
 
-
-def store_token(user, token):
-    expires = datetime.date.today() + datetime.timedelta(days=1)
-    db.session.execute(
-        "INSERT INTO user_tokens (user_id, token, expires) VALUES (:user_id, :token, :expires);",
-        {'user_id': user['user_id'], 'token': token, 'expires': expires})
-    db.session.commit()
 
 
 # same of how to do insert with parameters
