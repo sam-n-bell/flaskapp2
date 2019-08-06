@@ -1,4 +1,6 @@
 import config
+import auth
+import datetime
 
 from flask import current_app, Flask, redirect, url_for, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
@@ -15,6 +17,18 @@ db = SQLAlchemy(app)
 @app.route("/", methods=['GET'])
 def index():
     return jsonify({"Events Platform v1": "APAD Project - Sasha Opela & Sam Bell"})
+
+
+@app.route("/login", methods=['POST'])
+def create_token():
+    try:
+        content = request.json
+        user = email_pass_validation(content['email'], content['password'])
+        token = auth.create_token(user)
+        store_token(user, token)
+        return token, 200
+    except Exception as e:
+        return jsonify({"message": "Error logging in"}), 500
 
 
 @app.route("/users", methods=['GET'])
@@ -47,34 +61,62 @@ def add_user():
         return jsonify({"message": "Error Adding New User"}), 500  # returns a 500 status code with a message
 
 
-@app.route("/venues", methods=['GET', 'POST'])
+@app.route("/venues", methods=['GET'])
 def get_venues():
-    if request.method == 'GET':
-        query = db.session.execute('SELECT * FROM venues')
-        results = query.fetchall()  # returns a list
-        results_dicts = []
-        for r in results:
-            results_dicts.append(dict(r))
-        return jsonify(results_dicts)
-    else:
-        return jsonify({"message": "post"})
+    query = db.session.execute('SELECT * FROM venues')
+    results = query.fetchall()  # returns a list
+    results_dicts = []
+    for r in results:
+        results_dicts.append(dict(r))
+    return jsonify(results_dicts)
 
 
-@app.route("/events", methods=['GET', 'POST'])
+@app.route("/venues", methods=['POST'])
+def create_venue():
+    try:
+        pass
+    except Exception as e:
+        return jsonify({"message": "Error adding venue"}), 500
+
+
+@app.route("/events", methods=['GET'])
 def get_events():
-    if request.method == 'GET':
-        venue_id = request.args.get('venueId')
-        mine = request.args.get('mine')
-        time = request.args.get('time')
+    venue_id = request.args.get('venueId')
+    mine = request.args.get('mine')
+    time = request.args.get('time')
 
-        query = db.session.execute('SELECT * FROM events')
-        results = query.fetchall()  # returns a list
-        results_dicts = []
-        for r in results:
-            results_dicts.append(dict(r))
-        return jsonify(results_dicts)
+    query = db.session.execute('SELECT * FROM events')
+    results = query.fetchall()  # returns a list
+    results_dicts = []
+    for r in results:
+        results_dicts.append(dict(r))
+    return jsonify(results_dicts)
+
+
+@app.route("/events", methods=['POST'])
+def create_event():
+    try:
+        pass
+    except Exception as e:
+        return jsonify({"message": "Error adding venue"}), 500
+
+
+def email_pass_validation(email, password):
+    email = email.lower()
+    query = db.session.execute("SELECT * FROM users WHERE lower(email) = :email", {'email': email})
+    user = dict(query.fetchone())
+    if user['password'] == password and user['email'] == email:
+        return user
     else:
-        return jsonify({"message": "post"})
+        raise Exception('Invalid login')
+
+
+def store_token(user, token):
+    expires = datetime.date.today() + datetime.timedelta(days=1)
+    db.session.execute(
+        "INSERT INTO user_tokens (user_id, token, expires) VALUES (:user_id, :token, :expires);",
+        {'user_id': user['user_id'], 'token': token, 'expires': expires})
+    db.session.commit()
 
 
 # same of how to do insert with parameters
