@@ -9,17 +9,17 @@ from flask_cors import CORS
 
 
 app = Flask(__name__)
-CORS(app)
-app.config.from_object(config)
-db = SQLAlchemy(app)
+CORS(app) #asking to get data back
+app.config.from_object(config) #tells flask the project ID and cloud SQL details
+db = SQLAlchemy(app) #allows us to use SQL queries
 
 
-@app.route("/", methods=['GET'])
+@app.route("/", methods=['GET']) #Home Page for Flask App
 def index():
     return jsonify({"Events Platform v1": "APAD Project - Sasha Opela & Sam Bell"})
 
 
-def email_pass_validation(email, password):
+def email_pass_validation(email, password): #Making sure when someone logs in the password and email matches on file
     email = email.lower()
     query = db.session.execute("SELECT * FROM users WHERE lower(email) = :email", {'email': email})
     user = dict(query.fetchone())
@@ -28,16 +28,17 @@ def email_pass_validation(email, password):
     else:
         raise Exception('Invalid login')
 
-
-def store_token(user, token):
+#Takes in a user dictionary and a token string 
+def store_token(user, token): 
     expires = datetime.date.today() + datetime.timedelta(days=1)
     db.session.execute(
         "INSERT INTO user_tokens (user_id, token, expires) VALUES (:user_id, :token, :expires);",
         {'user_id': user['user_id'], 'token': token, 'expires': expires})
     db.session.commit()
 
-
+#Checking that the token is not expired
 def validate_token(header):
+# split where there is a space in the String - returns a list,( index 0 is Bearer),only return index 1 the token
     query = db.session.execute("SELECT ut.* FROM user_tokens ut WHERE ut.token = :token ORDER BY ut.date_created DESC LIMIT 1", {'token': header.split(' ')[1]})
     token_dict = dict(query.fetchone())
     if token_dict['expires'] < datetime.date.today():
@@ -57,32 +58,32 @@ def get_venue_availability(venueId):
         return jsonify({'eventid': "blank"})
     except Exception as e:
         return jsonify({'message': "An error occured joining event"}), 500
-
+#Vue will post data to this route 
 @app.route("/login", methods=['POST'])
 def create_token():
     try:
-        content = request.json
-        user = email_pass_validation(content['email'], content['password'])
-        token = auth.create_token(user)
-        store_token(user, token)
-        return token, 200
+        content = request.json #makes dictionary out of json request
+        user = email_pass_validation(content['email'], content['password']) #calling validation to make sure email and password will work
+        token = auth.create_token(user) 
+        store_token(user, token) 
+        return token, 201
     except Exception as e:
         return jsonify({"message": "Error logging in"}), 500
 
-
+#Returning a list of users from the database
 @app.route("/users", methods=['GET'])
 def get_users():
-    if request.method == 'GET':
+    try:
         query = db.session.execute('SELECT * FROM users')
         results = query.fetchall()  # returns a list
         results_dicts = []
         for r in results:
             results_dicts.append(dict(r))
         return jsonify(results_dicts)
-    else:
-        return jsonify('')
+    except Exception as e:
+        return jsonify({"message": "Error getting users"}), 500
 
-
+#Adding a user to the database
 @app.route("/users", methods=['POST'])
 def add_user():
     try:
@@ -95,17 +96,20 @@ def add_user():
     except Exception as e:
         return jsonify({"message": "Error Adding New User"}), 500  # returns a 500 status code with a message
 
-
+#Returning a list of all the venues
 @app.route("/venues", methods=['GET'])
 def get_venues():
-    query = db.session.execute('SELECT * FROM venues')
-    results = query.fetchall()  # returns a list
-    results_dicts = []
-    for r in results:
-        results_dicts.append(dict(r))
-    return jsonify(results_dicts)
+    try :
+        query = db.session.execute('SELECT * FROM venues')
+        results = query.fetchall()  # returns a list
+        results_dicts = []
+        for r in results:
+            results_dicts.append(dict(r))
+        return jsonify(results_dicts), 200
+    except Exception e as e:
+        return jsonify({"message": "Error getting list of venues "}), 500
 
-
+#Creating a venue
 @app.route("/venues", methods=['POST'])
 def create_venue():
     try:
@@ -117,19 +121,19 @@ def create_venue():
     except Exception as e:
         return jsonify({"message": "Error adding venue"}), 500
 
-
-@app.route("/events", methods=['GET'])
-def get_events():
-    venue_id = request.args.get('venueId')
-    mine = request.args.get('mine')
-    time = request.args.get('time')
-
-    query = db.session.execute('SELECT * FROM events')
-    results = query.fetchall()  # returns a list
-    results_dicts = []
-    for r in results:
-        results_dicts.append(dict(r))
-    return jsonify(results_dicts)
+#
+@app.route("/<venueId>/events", methods=['GET'])
+def get_events(venueId):
+    try:
+        day = request.args.get('date')
+        time = request.args.get('date')
+        events = []
+        events_dict=[]
+        if time != None:
+        query = db.session.execute("SELECT e.*, v.name as venue_name, count(distinct p.participant_id) +sum(p.num_guests) as total FROM events e LEFT JOIN venues v ON v.venue_id = e.venue_id ")
+        return jsonify(results_dicts)
+    except Exception as e:
+        return jsonify({"message:" "Error getting event"}), 500
 
 
 @app.route("/events", methods=['POST'])
