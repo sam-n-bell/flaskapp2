@@ -3,7 +3,7 @@ import auth
 import datetime
 import utilities
 
-from flask import current_app, Flask, redirect, url_for, jsonify, request
+from flask import current_app, Flask, redirect, url_for, jsonify, request, abort
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from flask_cors import CORS
@@ -23,11 +23,15 @@ def index():
 def email_pass_validation(email, password):  # Making sure when someone logs in the password and email matches on file
     email = email.lower()
     query = db.session.execute("SELECT * FROM users WHERE lower(email) = :email", {'email': email})
-    user = dict(query.fetchone())
+    user = query.fetchone()
+    if user is None:
+        abort(401, 'Incorrect login information')
+    else:
+        user = dict(user)
     if user['password'] == password and user['email'] == email:
         return user
     else:
-        raise Exception('Invalid login')
+        abort(401, 'Incorrect login information')
 
 # Takes in a user dictionary and a token string
 def store_token(user, token): 
@@ -41,9 +45,13 @@ def store_token(user, token):
 def validate_token(header):
 #  split where there is a space in the String - returns a list,( index 0 is Bearer),only return index 1 the token
     query = db.session.execute("SELECT ut.* FROM user_tokens ut WHERE ut.token = :token ORDER BY ut.date_created DESC LIMIT 1", {'token': header.split(' ')[1]})
-    token_dict = dict(query.fetchone())
+    token_dict = query.fetchone()
+    if token_dict is None:
+        abort(401, 'Token Not Exist')
+    else:
+        token_dict = dict(token_dict)
     if token_dict['expires'] < datetime.date.today():
-        raise Exception('Expired token')
+        abort(401, 'Expired token')
     decoded = auth.decode_token(header)
     return decoded  # user dict
 
@@ -59,7 +67,7 @@ def get_venue_availability(venueId):
         print(day)
         #day is needed for query
         if day == '' or day == None:
-            raise Exception('day needed')
+            abort(400, 'day needed')
 
         events_query = db.session.execute("SELECT e.* FROM events e WHERE e.event_day = :day and e.venue_id = :venue_id", {'day': day, 'venue_id': venueId})
         events = events_query.fetchall()
@@ -92,7 +100,7 @@ def get_venue_availability(venueId):
             opens += datetime.timedelta(hours=1)
         return jsonify(slots), 200
     except Exception as e:
-        return jsonify({'message': "An error occurred getting time slots for venue"}), 500
+        return jsonify({'message': str(e)}), 500
 
 #Vue will post data to this route 
 @app.route("/login", methods=['POST'])
@@ -101,10 +109,11 @@ def create_token():
         content = request.json #makes dictionary out of json request
         user = email_pass_validation(content['email'], content['password']) #calling validation to make sure email and password will work
         token = auth.create_token(user) 
-        store_token(user, token) 
-        return token, 201
+        store_token(user, token)
+        response_dict = {'token': str(token), 'user': user}
+        return jsonify(response_dict), 201
     except Exception as e:
-        return jsonify({"message": "Error logging in"}), 500
+        return jsonify({"message": str(e)}), 500
 
 #Returning a list of users from the database
 @app.route("/users", methods=['GET'])
@@ -194,9 +203,57 @@ def get_events(venueId):
 @app.route("/events", methods=['POST'])
 def create_event():
     try:
-        pass
+        content = request.json
+        venue_id = content['venue_id']
+        start_time = content['start_time']
+        day = content['event_day']
+        user_id = content['user_id']
+        event_name = content['name']
+        max_players = content['max_players']
+
+        event_day = datetime.datetime.strptime(day, "%Y-%m-%d")
+        if event_day.date() < datetime.datetime.today().date():
+            raise Exception('Can\'t create past dates')
+
+        venue_query = db.session.execute('''SELECT * 
+                                            FROM venues 
+                                            WHERE venue_id = :venue_id''',
+                                         {'venue_id': venue_id})
+        venue = venue_query.fetchone()
+
+        event_start_time = datetime.datetime.strptime(start_time, '%H:%M:%S')
+        venue_close_time = datetime.datetime.strptime(utilities.convert_timedelta_to_string(venue['close_time'], '%H:%M:%S'), '%H:%M:%S')
+        venue_open_time = datetime.datetime.strptime(utilities.convert_timedelta_to_string(venue['open_time'], '%H:%M:%S'), '%H:%M:%S')
+        if event_start_time < venue_open_time or event_start_time >= venue_close_time:
+            raise Exception("Your event is outside the venue hours")
+
+        event_query = db.session.execute('''SELECT 
+                                            * FROM events 
+                                            WHERE venue_id = :venue_id 
+                                            and event_day = :event_day 
+                                            and start_time = :start_time''',
+                                         {'venue_id': venue_id, 'event_day': event_day.strftime('%Y-%m-%d'), 'start_time': start_time})
+        event = event_query.fetchone()
+        if event != None:
+            raise Exception("An event already exists for that time.")
+
+        # create the new event
+        new_event_query = db.session.execute('''INSERT INTO events 
+                                                (created_by, event_day, start_time, venue_id, name, max_players) 
+                                                VALUES 
+                                                (:user_id, :event_day, :start_time, :venue_id, :event_name, :max_players)''',
+                                             {'user_id': user_id, 'event_day': event_day.strftime('%Y-%m-%d'),
+                                              'start_time': start_time, 'venue_id': venue_id,
+                                              'event_name': event_name, 'max_players': max_players})
+        db.session.commit()
+        new_event = new_event_query.lastrowid
+        print(new_event)
+
+
+
+        return jsonify(''), 200
     except Exception as e:
-        return jsonify({"message": "Error adding venue"}), 500
+        return jsonify({"message": str(e)}), 500
 
 @app.route("/<eventId>/join", methods=['POST'])
 def join_event(eventId):
