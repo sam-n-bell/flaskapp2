@@ -15,12 +15,22 @@ app.config.from_object(config)  # tells flask the project ID and cloud SQL detai
 db = SQLAlchemy(app)  # allows us to use SQL queries
 
 
-@app.route("/", methods=['GET'])  # Home Page for Flask App
+@app.route("/", methods=['GET'])
 def index():
+    """
+    Index route, returns general information about the flask app
+    :return:
+    """
     return jsonify({"Events Platform v1": "APAD Project - Sasha Opela & Sam Bell"})
 
 
-def email_pass_validation(email, password):  # Making sure when someone logs in the password and email matches on file
+def email_pass_validation(email, password):
+    """
+    Makes sure email and password from user are correct
+    :param email:
+    :param password:
+    :return: user dict
+    """
     email = email.lower()
     query = db.session.execute("SELECT * FROM users WHERE lower(email) = :email", {'email': email})
     user = query.fetchone()
@@ -33,16 +43,27 @@ def email_pass_validation(email, password):  # Making sure when someone logs in 
     else:
         abort(401, 'Incorrect login information')
 
-# Takes in a user dictionary and a token string
-def store_token(user, token): 
+
+def store_token(user, token):
+    """
+    Stores a new user token in the user token label
+    :param user: dict of user from users table
+    :param token: encoded token
+    :return:
+    """
     expires = datetime.date.today() + datetime.timedelta(days=1)
     db.session.execute(
         "INSERT INTO user_tokens (user_id, token, expires) VALUES (:user_id, :token, :expires);",
         {'user_id': user['user_id'], 'token': token, 'expires': expires})
     db.session.commit()
 
-#Checking that the token is not expired
+
 def validate_token(header):
+    """
+    validates that the token exists and isn't expired
+    :param header:
+    :return:
+    """
 #  split where there is a space in the String - returns a list,( index 0 is Bearer),only return index 1 the token
     query = db.session.execute("SELECT ut.* FROM user_tokens ut WHERE ut.token = :token ORDER BY ut.date_created DESC LIMIT 1", {'token': header.split(' ')[1]})
     token_dict = query.fetchone()
@@ -64,9 +85,9 @@ def get_venue_availability(venueId):
         # when a query param is just var=, it's an empty string
         user = validate_token(request.headers.get('Authorization'))
         day = request.args.get('day')
-        print(day)
+
         #day is needed for query
-        if day == '' or day == None:
+        if day == '' or day is None:
             abort(400, 'day needed')
 
         events_query = db.session.execute("SELECT e.* FROM events e WHERE e.event_day = :day and e.venue_id = :venue_id", {'day': day, 'venue_id': venueId})
@@ -102,18 +123,31 @@ def get_venue_availability(venueId):
     except Exception as e:
         return jsonify({'message': str(e)}), 500
 
-#Vue will post data to this route 
 @app.route("/login", methods=['POST'])
 def create_token():
+    """
+    validates email and password information from the user and creates a JWT/token
+    :return: one dict containing the token and a (sub) user dict
+    """
     try:
         content = request.json #makes dictionary out of json request
         user = email_pass_validation(content['email'], content['password']) #calling validation to make sure email and password will work
         token = auth.create_token(user) 
         store_token(user, token)
-        response_dict = {'token': str(token), 'user': user}
+        #https://github.com/jpadilla/pyjwt/issues/391 why to do UTF-8 decode here
+        #turns the byte token into the correct String version so it can be used in the jsonify
+        response_dict = {'token': token.decode('UTF-8'), 'user': user}
         return jsonify(response_dict), 201
     except Exception as e:
-        return jsonify({"message": str(e)}), 500
+        return jsonify({"message": "error logging in"}), 500
+
+@app.route("/user", methods=['GET'])
+def get_user():
+    try:
+        user = validate_token(request.headers.get('Authorization'))
+        return jsonify(user), 200
+    except Exception as e:
+        return jsonify({"message":str(e)}), 500
 
 #Returning a list of users from the database
 @app.route("/users", methods=['GET'])
@@ -210,10 +244,12 @@ def create_event():
         user_id = content['user_id']
         event_name = content['name']
         max_players = content['max_players']
+        participant_comment = content ['participant_comment']
+        num_guests = content['num_guests']
 
         event_day = datetime.datetime.strptime(day, "%Y-%m-%d")
         if event_day.date() < datetime.datetime.today().date():
-            raise Exception('Can\'t create past dates')
+            raise Exception('Can\'t create past events')
 
         venue_query = db.session.execute('''SELECT * 
                                             FROM venues 
@@ -238,9 +274,9 @@ def create_event():
             raise Exception("An event already exists for that time.")
 
         # create the new event
-        new_event_query = db.session.execute('''INSERT INTO events 
+        new_event_query = db.session.execute('''INSERT INTO events
                                                 (created_by, event_day, start_time, venue_id, name, max_players) 
-                                                VALUES 
+                                                VALUES
                                                 (:user_id, :event_day, :start_time, :venue_id, :event_name, :max_players)''',
                                              {'user_id': user_id, 'event_day': event_day.strftime('%Y-%m-%d'),
                                               'start_time': start_time, 'venue_id': venue_id,
@@ -268,7 +304,10 @@ def join_event(eventId):
     except Exception as e:
         return jsonify({'message': "An error occured joining event"}), 500
 
-
+def add_user_to_event(event_id,user_id,participant_comment,num_guests):
+    db.session.execute('''INSERT INTO participants(event_id, user_id, comment, num_guests)
+                            VALUES (:event_id, :user_id, :comment, :num_guests)''',
+                       {'event_id':event_id, 'user_id':user_id,'comment':participant_comment, 'num_guests':num_guests})
 
 # same of how to do insert with parameters
 # db.my_session.execute(
