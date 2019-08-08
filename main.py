@@ -213,6 +213,7 @@ def get_events():
         time = request.args.get('time')
         events = []
         events_dict=[]
+
         if time is not None and venue_id is not None:
             query = db.session.execute('''SELECT 
                                           e.*, 
@@ -238,8 +239,8 @@ def get_events():
             {'day': day, 'time': time})
             events = query.fetchall()
             #day, venueid provided
-            elif venue_id is not None:
-                query = db.session.execute('''SELECT e.*,
+        elif venue_id is not None:
+            query = db.session.execute('''SELECT e.*,
                                               v.name as venue_name, 
                                               count(distinct p.participant_id) +sum(p.num_guests) as current_num_players 
                                               FROM events e 
@@ -249,7 +250,7 @@ def get_events():
                                               GROUP BY e.event_id''',
                                        {'day': day, 'venue_id': venue_id})
             events = query.fetchall()
-            else:
+        else:
                 query = db.session.execute('''SELECT e.*,
                                                           v.name as venue_name, 
                                                           count(distinct p.participant_id) +sum(p.num_guests) as current_num_players 
@@ -262,11 +263,11 @@ def get_events():
 
         if events is not None:
             events_dict = [{'event_id': e['event_id'],
-                        'venue': e['venue_name'],
-                        'starts': utilities.convert_timedelta_to_string(e['start_time']), '%H:%M%S'),
-                        'name': e['name'],
-                        'max_players': e['max_players'],
-                        'current_num_players' : int(str(e['current_num_players'])) } for e in events]
+                            'venue': e['venue_name'],
+                            'starts': utilities.convert_timedelta_to_string(e['start_time'], '%H:%M:%S'),
+                            'name': e['name'],
+                            'max_players': e['max_players'],
+                            'current_num_players': int(str(e['current_num_players']))} for e in events]
         return jsonify(events_dict), 200
     except Exception as e:
         return jsonify({"message:" "Error getting event"}), 500
@@ -342,13 +343,13 @@ def join_event(event_id):
         if user_id != user['user_id']:
             is_admin(user)
 
-         p_query = db.session.execute('''SELECT
+        p_query = db.session.execute('''SELECT
                                         p*
                                         from participants p
                                         WHERE p.event_id = :event_id
                                         and p.user_id =:user_id''', {'event_id':event_id, 'user_id':user_id})
         participant = p_query.fetchone()
-        if participant is Not None:
+        if participant is not None:
             raise Exception('Already in game')
 
         query = db.session.execute('''SELECT e.*, 
