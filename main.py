@@ -77,13 +77,20 @@ def validate_token(header):
     return decoded  # user dict
 
 
+def is_admin(user):
+    if user['administrator'] == 1:
+        return True
+    else:
+        raise Exception('Not an admin')
+
+
 @app.route("/<venueId>/availability", methods=['GET'])
 def get_venue_availability(venueId):
     try:
         # venueId is from the URL
         # when a query param is missing, it's None
         # when a query param is just var=, it's an empty string
-        user = validate_token(request.headers.get('Authorization'))
+        validate_token(request.headers.get('Authorization'))
         day = request.args.get('day')
 
         #day is needed for query
@@ -141,7 +148,7 @@ def create_token():
     except Exception as e:
         return jsonify({"message": "error logging in"}), 500
 
-@app.route("/user", methods=['GET'])
+@app.route("/authenticate", methods=['GET'])
 def get_user():
     try:
         user = validate_token(request.headers.get('Authorization'))
@@ -153,6 +160,7 @@ def get_user():
 @app.route("/users", methods=['GET'])
 def get_users():
     try:
+        validate_token(request.headers.get('Authorization'))
         query = db.session.execute('SELECT * FROM users')
         results = query.fetchall()  # returns a list
         results_dicts = []
@@ -166,12 +174,19 @@ def get_users():
 @app.route("/users", methods=['POST'])
 def add_user():
     try:
-            content = request.json # turns the json request body into a dict :D
-            query = db.session.execute("INSERT INTO users (name, email, password, administrator) VALUES (:name, :email, :password, :administrator);",
-                               {'name': content['name'], 'email': content['email'], 'password': content['password'], 'administrator': content['administrator']})
-            # print(query.lastrowid) # returns last id
-            db.session.commit()
-            return jsonify({"message": "User Added"}), 201  # returns a 201 status code with a message
+        user = validate_token(request.headers.get('Authorization'))
+        if user['administrator'] != 1:
+            raise Exception('You don\'t have permission')
+
+        content = request.json # turns the json request body into a dict :D
+        print(content)
+        db.session.execute('''INSERT INTO users
+                            (name, email, password, administrator)
+                            VALUES
+                            (:name, :email, :password, :administrator);''',
+                            {'name': content['name'], 'email': content['email'], 'password': content['password'], 'administrator': content['administrator']})
+        db.session.commit()
+        return jsonify({"message": "User Added"}), 201  # returns a 201 status code with a message
     except Exception as e:
         return jsonify({"message": "Error Adding New User"}), 500  # returns a 500 status code with a message
 
@@ -180,6 +195,7 @@ def add_user():
 @app.route("/venues", methods=['GET'])
 def get_venues():
     try:
+        validate_token(request.headers.get('Authorization'))
         query = db.session.execute('SELECT * FROM venues')
         results = query.fetchall()  # returns a list
         results_dicts = []
@@ -196,6 +212,7 @@ def get_venues():
 @app.route("/venues", methods=['POST'])
 def create_venue():
     try:
+        validate_token(request.headers.get('Authorization'))
         content = request.json
         db.session.execute("INSERT INTO venues (name, address, activities) VALUES (:name, :address, :activities",
                           {'name': content['name'], 'address': content['address'], 'activities': content['activities']})
@@ -222,7 +239,7 @@ def get_events():
                                           FROM events e 
                                           LEFT JOIN venues v ON v.venue_id = e.venue_id 
                                           LEFT JOIN participants p on p.event_id = e.event_id 
-                                          WHERE e.start_time = :time AND e.event_day = : day and e.venue_id = : venueId
+                                          WHERE e.start_time = :time AND e.event_day = :day and e.venue_id = :venueId
                                           GROUP BY e.event_id''',
                                         {'time': time, 'day': day, 'venueId': venue_id})
             events = query.fetchall()
@@ -234,7 +251,7 @@ def get_events():
                                           FROM events e 
                                           LEFT JOIN venues v ON v.venue_id = e.venue_id 
                                           LEFT JOIN participants p on p.event_id = e.event_id 
-                                          WHERE e.event_day = : day and e.start_time = : time
+                                          WHERE e.event_day = :day and e.start_time = :time
                                           GROUP BY e.event_id''',
             {'day': day, 'time': time})
             events = query.fetchall()
@@ -246,20 +263,21 @@ def get_events():
                                               FROM events e 
                                               LEFT JOIN venues v ON v.venue_id = e.venue_id 
                                               LEFT JOIN participants p on p.event_id = e.event_id 
-                                              WHERE e.event_day = : day and e.venue_id =: venue_id
+                                              WHERE e.event_day = :day and e.venue_id = :venue_id
                                               GROUP BY e.event_id''',
                                        {'day': day, 'venue_id': venue_id})
             events = query.fetchall()
         else:
+                print('doing this one' + day)
                 query = db.session.execute('''SELECT e.*,
                                                           v.name as venue_name, 
                                                           count(distinct p.participant_id) +sum(p.num_guests) as current_num_players 
                                                           FROM events e 
                                                           LEFT JOIN venues v ON v.venue_id = e.venue_id 
                                                           LEFT JOIN participants p on p.event_id = e.event_id 
-                                                          WHERE e.event_day = : day
+                                                          WHERE e.event_day = :day::date
                                                           GROUP BY e.event_id''',
-                                       {'day': day})
+                                           {'day': datetime.datetime.strptime(day, '%Y-%m-%d')})
 
         if events is not None:
             events_dict = [{'event_id': e['event_id'],
@@ -321,12 +339,47 @@ def create_event():
                                               'start_time': start_time, 'venue_id': venue_id,
                                               'event_name': event_name, 'max_players': max_players})
         db.session.commit()
-        new_event = new_event_query.lastrowid
-        print(new_event)
+        new_event_id = new_event_query.lastrowid
+        add_user_to_event(new_event_id, user_id, participant_comment, num_guests)
+        return jsonify(''), 201
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 
+@app.route("/events/<event_id>", methods=['DELETE'])
+def remove_event(event_id):
+    try:
+        user = validate_token(request.headers.get('Authorization'))
+        event_query = db.session.execute('''SELECT * FROM events WHERE event_id = :event_id''', {'event_id': event_id})
+        event = dict(event_query.fetchone())
+        if user['user_id'] == event['created_by'] or user['administrator'] == 1:
+            db.session.execute('''DELETE FROM events WHERE event_id = :event_id''', {'event_id': event_id})
+            db.session.commit()
+            db.session.execute('''DELETE FROM participants WHERE event_id = :event_id''', {'event_id': event_id})
+            db.session.commit()
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 
+@app.route("/my-events", methods=['GET'])
+def get_my_events():
+    try:
+        user = validate_token(request.headers.get('Authorization'))
+        events_query = db.session.execute('''SELECT e.*, v.name as venue_name
+                                            FROM participants p
+                                            LEFT JOIN events e on e.event_id = p.event_id
+                                            LEFT JOIN venues v on v.venue_id = e.venue_id
+                                            WHERE p.user_id = :user_id''',
+                                          {'user_id': user['user_id']})
 
-        return jsonify(''), 200
+        events = [{
+            'event_id': e['event_id'],
+            'name': e['name'],
+            'created_by': e['created_by'],
+            'event_day': datetime.datetime.strftime(e['event_day'], '%m/%d/%Y'),
+            'start_time': utilities.convert_timedelta_to_string(e['start_time'], '%H:%M:%S'),
+            'venue_name': e['venue_name'],
+        } for e in events_query.fetchall()]
+
+        return jsonify(events), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
@@ -368,16 +421,14 @@ def join_event(event_id):
     except Exception as e:
         return jsonify({'message': str(e)}), 500
 
+
 def add_user_to_event(event_id,user_id,participant_comment,num_guests):
     db.session.execute('''INSERT INTO participants(event_id, user_id, comment, num_guests)
                             VALUES (:event_id, :user_id, :comment, :num_guests)''',
                        {'event_id':event_id, 'user_id':user_id,'comment':participant_comment, 'num_guests':num_guests})
+    db.session.commit()
 
-def is_admin(user):
-    if user['administrator'] == 1:
-        return True
-    else:
-        raise Exception('Not an admin')
+
 
 # same of how to do insert with parameters
 # db.my_session.execute(
