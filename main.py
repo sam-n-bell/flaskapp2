@@ -268,24 +268,27 @@ def get_events():
                                        {'day': day, 'venue_id': venue_id})
             events = query.fetchall()
         else:
-                print('doing this one' + day)
-                query = db.session.execute('''SELECT e.*,
-                                                          v.name as venue_name, 
-                                                          count(distinct p.participant_id) +sum(p.num_guests) as current_num_players 
-                                                          FROM events e 
-                                                          LEFT JOIN venues v ON v.venue_id = e.venue_id 
-                                                          LEFT JOIN participants p on p.event_id = e.event_id 
-                                                          WHERE e.event_day = :day::date
-                                                          GROUP BY e.event_id''',
-                                           {'day': datetime.datetime.strptime(day, '%Y-%m-%d')})
+            query = db.session.execute('''SELECT e.*,
+                                              v.name as venue_name, 
+                                              count(distinct p.participant_id) +sum(p.num_guests) as current_num_players 
+                                              FROM events e 
+                                              LEFT JOIN venues v ON v.venue_id = e.venue_id 
+                                              LEFT JOIN participants p on p.event_id = e.event_id 
+                                              WHERE e.event_day = :day
+                                              GROUP BY e.event_id''',
+                                       {'day': day})
+            events = query.fetchall()
 
         if events is not None:
             events_dict = [{'event_id': e['event_id'],
                             'venue': e['venue_name'],
+                            'event_day': e['event_day'].strftime('%m/%d/%Y'),
                             'starts': utilities.convert_timedelta_to_string(e['start_time'], '%H:%M:%S'),
                             'name': e['name'],
                             'max_players': e['max_players'],
-                            'current_num_players': int(str(e['current_num_players']))} for e in events]
+                            'current_num_players': int(str(e['current_num_players']))}
+                           for e in events]
+
         return jsonify(events_dict), 200
     except Exception as e:
         return jsonify({"message:" "Error getting event"}), 500
@@ -345,6 +348,7 @@ def create_event():
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
+
 @app.route("/events/<event_id>", methods=['DELETE'])
 def remove_event(event_id):
     try:
@@ -358,6 +362,7 @@ def remove_event(event_id):
             db.session.commit()
     except Exception as e:
         return jsonify({"message": str(e)}), 500
+
 
 @app.route("/my-events", methods=['GET'])
 def get_my_events():
@@ -382,6 +387,7 @@ def get_my_events():
         return jsonify(events), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
+
 
 @app.route("/events/<event_id>/join", methods=['POST'])
 def join_event(event_id):
