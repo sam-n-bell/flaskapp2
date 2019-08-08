@@ -205,31 +205,69 @@ def create_venue():
         return jsonify({"message": "Error adding venue"}), 500
 
 #
-@app.route("/<venueId>/events", methods=['GET'])
-def get_events(venueId):
+@app.route("/events", methods=['GET'])
+def get_events():
     try:
+        venue_id = request.args.get('venueId')
         day = request.args.get('date')
-        time = request.args.get('date')
+        time = request.args.get('time')
         events = []
         events_dict=[]
-        if time != None:
-            query = db.session.execute("SELECT e.*, v.name as venue_name, count(distinct p.participant_id) +sum(p.num_guests) as total FROM events e LEFT JOIN venues v ON v.venue_id = e.venue_id LEFT JOIN participants p on p.event_id = e.event_id WHERE e.start_time :time AND e.event_day : day and e.venue_id : venueId",
-            {'time': time, 'day': day, 'venueId': venueId})
+        if time is not None and venue_id is not None:
+            query = db.session.execute('''SELECT 
+                                          e.*, 
+                                          v.name as venue_name, 
+                                          count(distinct p.participant_id) +sum(p.num_guests) as current_num_players 
+                                          FROM events e 
+                                          LEFT JOIN venues v ON v.venue_id = e.venue_id 
+                                          LEFT JOIN participants p on p.event_id = e.event_id 
+                                          WHERE e.start_time = :time AND e.event_day = : day and e.venue_id = : venueId
+                                          GROUP BY e.event_id''',
+                                        {'time': time, 'day': day, 'venueId': venue_id})
             events = query.fetchall()
-        else:
-            query = db.session.execute("SELECT e.*, v.name as venue_name, count(distinct p.participant_id) +sum(p.num_guests) as total FROM events e LEFT JOIN venues v ON v.venue_id = e.venue_id LEFT JOIN participants p on p.event_id = e.event_id WHERE e.event_day : day and e.venue_id : venueId GROUP BY e.event_id",
-            {'day': day, 'venueId': venueId})
+            #day, time provided
+        elif time is not None:
+            query = db.session.execute('''SELECT e.*,
+                                          v.name as venue_name, 
+                                          count(distinct p.participant_id) +sum(p.num_guests) as current_num_players 
+                                          FROM events e 
+                                          LEFT JOIN venues v ON v.venue_id = e.venue_id 
+                                          LEFT JOIN participants p on p.event_id = e.event_id 
+                                          WHERE e.event_day = : day and e.start_time = : time
+                                          GROUP BY e.event_id''',
+            {'day': day, 'time': time})
             events = query.fetchall()
+            #day, venueid provided
+            elif venue_id is not None:
+                query = db.session.execute('''SELECT e.*,
+                                              v.name as venue_name, 
+                                              count(distinct p.participant_id) +sum(p.num_guests) as current_num_players 
+                                              FROM events e 
+                                              LEFT JOIN venues v ON v.venue_id = e.venue_id 
+                                              LEFT JOIN participants p on p.event_id = e.event_id 
+                                              WHERE e.event_day = : day and e.venue_id =: venue_id
+                                              GROUP BY e.event_id''',
+                                       {'day': day, 'venue_id': venue_id})
+            events = query.fetchall()
+            else:
+                query = db.session.execute('''SELECT e.*,
+                                                          v.name as venue_name, 
+                                                          count(distinct p.participant_id) +sum(p.num_guests) as current_num_players 
+                                                          FROM events e 
+                                                          LEFT JOIN venues v ON v.venue_id = e.venue_id 
+                                                          LEFT JOIN participants p on p.event_id = e.event_id 
+                                                          WHERE e.event_day = : day
+                                                          GROUP BY e.event_id''',
+                                       {'day': day})
 
-        if (len(events) > 0 and events[0]['event_id'] != None):
+        if events is not None:
             events_dict = [{'event_id': e['event_id'],
                         'venue': e['venue_name'],
-                        'starts': e['start_time'],
+                        'starts': utilities.convert_timedelta_to_string(e['start_time']), '%H:%M%S'),
                         'name': e['name'],
                         'max_players': e['max_players'],
-                        'total': e['total']}
-                       for e in events]
-        return jsonify(''), 200
+                        'current_num_players' : int(str(e['current_num_players'])) } for e in events]
+        return jsonify(events_dict), 200
     except Exception as e:
         return jsonify({"message:" "Error getting event"}), 500
 
@@ -270,7 +308,7 @@ def create_event():
                                             and start_time = :start_time''',
                                          {'venue_id': venue_id, 'event_day': event_day.strftime('%Y-%m-%d'), 'start_time': start_time})
         event = event_query.fetchone()
-        if event != None:
+        if event is not None:
             raise Exception("An event already exists for that time.")
 
         # create the new event
@@ -291,23 +329,54 @@ def create_event():
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
-@app.route("/<eventId>/join", methods=['POST'])
-def join_event(eventId):
+@app.route("/events/<event_id>/join", methods=['POST'])
+def join_event(event_id):
     try:
-        # eventId is from the URL
-        #
         user = validate_token(request.headers.get('Authorization'))
 
-        query = db.session.execute("SELECT e.*, (COUNT(distinct p.user_id) + SUM(p.num_guests)) AS num_players FROM events e LEFT JOIN participants p on p.event_id = e.event_id WHERE e.event_id = :event_id", {'event_id': eventId})
-        event = dict(query.fetchone())
-        return jsonify({'eventid': eventId})
+        content = request.json
+        num_guests = content['num_guests']
+        participant_comment = content['participant_comment']
+        user_id = content['user_id']
+        #makes sure an admin account is being used to add a user to an event even if ids dont match
+        if user_id != user['user_id']:
+            is_admin(user)
+
+         p_query = db.session.execute('''SELECT
+                                        p*
+                                        from participants p
+                                        WHERE p.event_id = :event_id
+                                        and p.user_id =:user_id''', {'event_id':event_id, 'user_id':user_id})
+        participant = p_query.fetchone()
+        if participant is Not None:
+            raise Exception('Already in game')
+
+        query = db.session.execute('''SELECT e.*, 
+                                      (COUNT(distinct p.user_id) + SUM(p.num_guests)) AS num_players 
+                                       FROM events e 
+                                       LEFT JOIN participants p on p.event_id = e.event_id 
+                                       WHERE e.event_id = :event_id''', {'event_id': event_id})
+        event = dict(query.fetchone()) #Will return a tuple of Nones if event does not exist
+        if event['event_id'] is None:
+            raise Exception('Event doesn\'t exist')
+        event['num_players']= int(str(event['num_players']))
+        if event['max_players'] - event['num_players'] <= 1 + num_guests:
+            raise Exception('Not enough space')
+        add_user_to_event(event_id,user_id,participant_comment, num_guests)
+        return jsonify({'message': 'added'}), 201
     except Exception as e:
-        return jsonify({'message': "An error occured joining event"}), 500
+        return jsonify({'message': str(e)}), 500
 
 def add_user_to_event(event_id,user_id,participant_comment,num_guests):
     db.session.execute('''INSERT INTO participants(event_id, user_id, comment, num_guests)
                             VALUES (:event_id, :user_id, :comment, :num_guests)''',
                        {'event_id':event_id, 'user_id':user_id,'comment':participant_comment, 'num_guests':num_guests})
+
+def is_admin(user):
+    if user['administrator'] == 1:
+        return True
+    else:
+        raise Exception('Not an admin')
 
 # same of how to do insert with parameters
 # db.my_session.execute(
