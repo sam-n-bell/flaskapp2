@@ -118,13 +118,18 @@ def get_venue_availability(venueId):
                 "reserved": False
             }
             slot_begins = opens
+            slot_reserved = False
+
             for e in events:
                 event_begins = datetime.datetime.strptime(utilities.convert_timedelta_to_string(e['start_time'], '%H:%M:%S'), '%H:%M:%S')
                 if (event_begins == slot_begins):
-                    time_dict['reserved'] = True
+                    # time_dict['reserved'] = True
+                    slot_reserved = True
                 else:
                     pass
-            slots.append(time_dict)
+            if slot_reserved is False:
+                slots.append(time_dict)
+
             opens += datetime.timedelta(hours=1)
         return jsonify(slots), 200
     except Exception as e:
@@ -221,7 +226,7 @@ def create_venue():
     except Exception as e:
         return jsonify({"message": "Error adding venue"}), 500
 
-#
+
 @app.route("/events", methods=['GET'])
 def get_events():
     try:
@@ -281,11 +286,12 @@ def get_events():
 
         if events is not None:
             events_dict = [{'event_id': e['event_id'],
-                            'venue': e['venue_name'],
+                            'venue_name': e['venue_name'],
                             'event_day': e['event_day'].strftime('%m/%d/%Y'),
-                            'starts': utilities.convert_timedelta_to_string(e['start_time'], '%H:%M:%S'),
+                            'start_time': utilities.convert_timedelta_to_string(e['start_time'], '%H:%M:%S'),
                             'name': e['name'],
                             'max_players': e['max_players'],
+                            'created_by': e['created_by'],
                             'current_num_players': int(str(e['current_num_players']))}
                            for e in events]
 
@@ -301,7 +307,7 @@ def create_event():
         venue_id = content['venue_id']
         start_time = content['start_time']
         day = content['event_day']
-        user_id = content['user_id']
+        user_id = content['created_by']
         event_name = content['name']
         max_players = content['max_players']
         participant_comment = content ['participant_comment']
@@ -360,6 +366,31 @@ def remove_event(event_id):
             db.session.commit()
             db.session.execute('''DELETE FROM participants WHERE event_id = :event_id''', {'event_id': event_id})
             db.session.commit()
+        else:
+            raise Exception('You do not have permission to do that.')
+        return jsonify({'message': 'deleted'}), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+
+@app.route("/register", methods=['POST'])
+def public_registration():
+    try:
+        content = request.json
+        name = content['name']
+        password = content['password']
+        email = content['email']
+        email_check_query = db.session.execute('''SELECT * FROM users WHERE lower(email) = lower(:email)''', {'email': email})
+        if email_check_query.fetchone() is not None:
+            raise Exception('Email already in use')
+
+        db.session.execute('''INSERT INTO
+                                users (name, password, email)
+                                VALUES
+                                (:name, :password, :email)''',
+                           {'name': name, 'password': password, 'email': email})
+        db.session.commit()
+        return jsonify({"message": 'registered'}), 201
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
@@ -372,7 +403,8 @@ def get_my_events():
                                             FROM participants p
                                             LEFT JOIN events e on e.event_id = p.event_id
                                             LEFT JOIN venues v on v.venue_id = e.venue_id
-                                            WHERE p.user_id = :user_id''',
+                                            WHERE p.user_id = :user_id
+                                            ORDER BY e.event_day DESC''',
                                           {'user_id': user['user_id']})
 
         events = [{
