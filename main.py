@@ -219,7 +219,7 @@ def create_venue():
     try:
         validate_token(request.headers.get('Authorization'))
         content = request.json
-        db.session.execute("INSERT INTO venues (name, address, activities) VALUES (:name, :address, :activities",
+        db.session.execute("INSERT INTO venues (name, address, activities) VALUES (:name, :address, :activities)",
                           {'name': content['name'], 'address': content['address'], 'activities': content['activities']})
         db.session.commit()
         return jsonify({"message": "Venue Added"}), 201  # returns a 201 status code with a message
@@ -369,6 +369,30 @@ def remove_event(event_id):
         else:
             raise Exception('You do not have permission to do that.')
         return jsonify({'message': 'deleted'}), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route("/venues/<venue_id>", methods =['DELETE'])
+def remove_venue(venue_id):
+    try:
+        user = validate_token(request.headers.get('Authorization'))
+        events_at_venue = db.session.execute('''SELECT event_id FROM events where venue_id = :venue_id''', {'venue_id':venue_id})
+        events = events_at_venue.fetchall()
+        if user['administrator'] == 1:
+            for i in events:
+                event = dict(i)
+                #deleting participants out of events out of the venue
+                db.session.execute('''DELETE FROM participants WHERE event_id =:event_id''', {'event_id':event_id})
+                db.session.commit()
+
+                db.session.execute('''DELETE FROM events WHERE venue_id =:venue_id''', {'venue_id': venue_id})
+                db.session.commit()
+                db.session.execute('''DELETE FROM venues WHERE venue_id =:venue_id''', {'venue_id': venue_id})
+
+                db.session.commit()
+            else:
+                raise Exception('You do not have permission to perform this action.')
+            return jsonify({'message: ''deleted'}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
