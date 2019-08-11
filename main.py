@@ -192,11 +192,9 @@ def add_user():
         #validate token
         user = validate_token(request.headers.get('Authorization'))
         #if user is not admin, they do not have persmission to add user
-        if user['administrator'] != 1:
-            raise Exception('You don\'t have permission')
+        is_admin(user)
 
         content = request.json # turns the json request body into a dict :D
-        print(content)
         #insert name, email, password, and if user is admin or not into users table
         db.session.execute('''INSERT INTO users
                             (name, email, password, administrator)
@@ -231,8 +229,7 @@ def get_venues():
 def create_venue():
     try:
         user = validate_token(request.headers.get('Authorization'))
-        if user['administrator'] != 1:
-            raise Exception('You don\'t have permission')
+        is_admin(user)
         content = request.json
         db.session.execute("INSERT INTO venues (name, address, activities) VALUES (:name, :address, :activities)",
                           {'name': content['name'], 'address': content['address'], 'activities': content['activities']})
@@ -384,7 +381,7 @@ def remove_event(event_id):
         event_query = db.session.execute('''SELECT * FROM events WHERE event_id = :event_id''', {'event_id': event_id})
         event = dict(event_query.fetchone()) #fetch the event
         #user must have created event or be an admin to delete event
-        if user['user_id'] == event['created_by'] or user['administrator'] == 1:
+        if user['user_id'] == event['created_by'] or is_admin(user):
             db.session.execute('''DELETE FROM events WHERE event_id = :event_id''', {'event_id': event_id}) #delete the event
             db.session.commit()
             db.session.execute('''DELETE FROM participants WHERE event_id = :event_id''', {'event_id': event_id}) #delete the participants from event
@@ -404,20 +401,18 @@ def remove_venue(venue_id):
         events_at_venue = db.session.execute('''SELECT event_id FROM events where venue_id = :venue_id''', {'venue_id':venue_id})
         events = events_at_venue.fetchall() #fetch all events at venue
         #user must be admin
-        if user['administrator'] == 1:
-            for i in events:
-                event = dict(i)
-                #deleting participants out of events happening at the venue
-                db.session.execute('''DELETE FROM participants WHERE event_id =:event_id''', {'event_id':event_id})
-                db.session.commit()
-                #deleting the events that are happening at the venue
-                db.session.execute('''DELETE FROM events WHERE venue_id =:venue_id''', {'venue_id': venue_id})
-                db.session.commit()
-                #deleting the venue
-                db.session.execute('''DELETE FROM venues WHERE venue_id =:venue_id''', {'venue_id': venue_id})
-                db.session.commit()
-        else:
-            raise Exception('You do not have permission to perform this action.')
+        is_admin(user)
+        for i in events:
+            event = dict(i)
+            #deleting participants out of events happening at the venue
+            db.session.execute('''DELETE FROM participants WHERE event_id =:event_id''', {'event_id': event['event_id']})
+            db.session.commit()
+            #deleting the events that are happening at the venue
+            db.session.execute('''DELETE FROM events WHERE venue_id =:venue_id''', {'venue_id': venue_id})
+            db.session.commit()
+            #deleting the venue
+            db.session.execute('''DELETE FROM venues WHERE venue_id =:venue_id''', {'venue_id': venue_id})
+            db.session.commit()
         return jsonify({'message: ''deleted'}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
@@ -510,7 +505,7 @@ def join_event(event_id):
         event['num_players']= int(str(event['num_players']))
         if event['max_players'] - event['num_players'] <= 1 + num_guests:
             raise Exception('Not enough space')
-        add_user_to_event(event_id,user_id,participant_comment, num_guests #call add user to event
+        add_user_to_event(event_id,user_id,participant_comment, num_guests) #call add user to event
         return jsonify({'message': 'added'}), 201
     except Exception as e:
         return jsonify({'message': str(e)}), 500
