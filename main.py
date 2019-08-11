@@ -41,7 +41,7 @@ def email_pass_validation(email, password):
         #else set user dict
     else:
         user = dict(user)
-        #if user password and email matches what is in table return user 
+        #if user password and email matches what is in table return user
     if user['password'] == password and user['email'] == email:
         return user
         #else, abort
@@ -80,9 +80,9 @@ def validate_token(header):
         #else set token dict
     else:
         token_dict = dict(token_dict)
-        #if the token expiration date is less than today's date, it has expired, abort 
+        #if the token expiration date is less than today's date, it has expired, abort
     if token_dict['expires'] < datetime.date.today():
-        abort(401, 'Expired token')
+        raise Exception('Expired token')
     decoded = auth.decode_token(header)
     return decoded  # user dict
 
@@ -246,6 +246,7 @@ def create_venue():
 #Returning events
 def get_events():
     try:
+        validate_token(request.headers.get('Authorization'))
         venue_id = request.args.get('venueId')
         day = request.args.get('date')
         time = request.args.get('time')
@@ -415,9 +416,9 @@ def remove_venue(venue_id):
                 #deleting the venue
                 db.session.execute('''DELETE FROM venues WHERE venue_id =:venue_id''', {'venue_id': venue_id})
                 db.session.commit()
-            else:
-                raise Exception('You do not have permission to perform this action.')
-            return jsonify({'message: ''deleted'}), 200
+        else:
+            raise Exception('You do not have permission to perform this action.')
+        return jsonify({'message: ''deleted'}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
