@@ -9,7 +9,7 @@ from sqlalchemy import text
 from flask_cors import CORS
 
 
-app = Flask(__name__)
+app = Flask(__name__) #creating an instance of the Flask class and assigning it to the app variable
 CORS(app)  # asking to get data back
 app.config.from_object(config)  # tells flask the project ID and cloud SQL details
 db = SQLAlchemy(app)  # allows us to use SQL queries
@@ -32,14 +32,19 @@ def email_pass_validation(email, password):
     :return: user dict
     """
     email = email.lower()
+    #Select all from users when email entered matches email in table
     query = db.session.execute("SELECT * FROM users WHERE lower(email) = :email", {'email': email})
-    user = query.fetchone()
+    user = query.fetchone() #fetching one user
+    #if there is no such user, abort
     if user is None:
         abort(401, 'Incorrect login information')
+        #else set user dict
     else:
         user = dict(user)
+        #if user password and email matches what is in table return user 
     if user['password'] == password and user['email'] == email:
         return user
+        #else, abort
     else:
         abort(401, 'Incorrect login information')
 
@@ -51,7 +56,9 @@ def store_token(user, token):
     :param token: encoded token
     :return:
     """
+    #when the token expires
     expires = datetime.date.today() + datetime.timedelta(days=1)
+    #storing user id, token, expiration in user_tokens table
     db.session.execute(
         "INSERT INTO user_tokens (user_id, token, expires) VALUES (:user_id, :token, :expires);",
         {'user_id': user['user_id'], 'token': token, 'expires': expires})
@@ -66,17 +73,20 @@ def validate_token(header):
     """
 #  split where there is a space in the String - returns a list,( index 0 is Bearer),only return index 1 the token
     query = db.session.execute("SELECT ut.* FROM user_tokens ut WHERE ut.token = :token ORDER BY ut.date_created DESC LIMIT 1", {'token': header.split(' ')[1]})
-    token_dict = query.fetchone()
+    token_dict = query.fetchone() #fetching one token
+    #if there is no token, abort
     if token_dict is None:
         abort(401, 'Token Not Exist')
+        #else set token dict
     else:
         token_dict = dict(token_dict)
+        #if the token expiration date is less than today's date, it has expired, abort 
     if token_dict['expires'] < datetime.date.today():
         abort(401, 'Expired token')
     decoded = auth.decode_token(header)
     return decoded  # user dict
 
-
+#If user is a admin, they have admin privileges
 def is_admin(user):
     if user['administrator'] == 1:
         return True
@@ -96,12 +106,12 @@ def get_venue_availability(venueId):
         #day is needed for query
         if day == '' or day is None:
             abort(400, 'day needed')
-
+        #Select all from events where day and venue_id match
         events_query = db.session.execute("SELECT e.* FROM events e WHERE e.event_day = :day and e.venue_id = :venue_id", {'day': day, 'venue_id': venueId})
-        events = events_query.fetchall()
-
+        events = events_query.fetchall() #fetch all events
+        #Select all from venues where venue_id matches
         venue_query = db.session.execute("SELECT v.* FROM venues v WHERE v.venue_id = :venueId", {'venueId': venueId})
-        venue = dict(venue_query.fetchone())
+        venue = dict(venue_query.fetchone()) #fetch one venue
 
         # strptime parses a string "time" to create a new datetime object
         opens = datetime.datetime.strptime(utilities.convert_timedelta_to_string(venue['open_time'], '%H:%M:%S'), '%H:%M:%S')
@@ -179,12 +189,15 @@ def get_users():
 @app.route("/users", methods=['POST'])
 def add_user():
     try:
+        #validate token
         user = validate_token(request.headers.get('Authorization'))
+        #if user is not admin, they do not have persmission to add user
         if user['administrator'] != 1:
             raise Exception('You don\'t have permission')
 
         content = request.json # turns the json request body into a dict :D
         print(content)
+        #insert name, email, password, and if user is admin or not into users table
         db.session.execute('''INSERT INTO users
                             (name, email, password, administrator)
                             VALUES
@@ -217,7 +230,9 @@ def get_venues():
 @app.route("/venues", methods=['POST'])
 def create_venue():
     try:
-        validate_token(request.headers.get('Authorization'))
+        user = validate_token(request.headers.get('Authorization'))
+        if user['administrator'] != 1:
+            raise Exception('You don\'t have permission')
         content = request.json
         db.session.execute("INSERT INTO venues (name, address, activities) VALUES (:name, :address, :activities)",
                           {'name': content['name'], 'address': content['address'], 'activities': content['activities']})
@@ -228,6 +243,7 @@ def create_venue():
 
 
 @app.route("/events", methods=['GET'])
+#Returning events
 def get_events():
     try:
         venue_id = request.args.get('venueId')
@@ -235,7 +251,7 @@ def get_events():
         time = request.args.get('time')
         events = []
         events_dict=[]
-
+              #day, time, venueId provided
         if time is not None and venue_id is not None:
             query = db.session.execute('''SELECT 
                                           e.*, 
@@ -272,6 +288,7 @@ def get_events():
                                               GROUP BY e.event_id''',
                                        {'day': day, 'venue_id': venue_id})
             events = query.fetchall()
+            #day provided
         else:
             query = db.session.execute('''SELECT e.*,
                                               v.name as venue_name, 
@@ -314,9 +331,10 @@ def create_event():
         num_guests = content['num_guests']
 
         event_day = datetime.datetime.strptime(day, "%Y-%m-%d")
+        #preventing users from creating an event on a past date
         if event_day.date() < datetime.datetime.today().date():
             raise Exception('Can\'t create past events')
-
+        #select all from venues where venueid matches
         venue_query = db.session.execute('''SELECT * 
                                             FROM venues 
                                             WHERE venue_id = :venue_id''',
@@ -326,9 +344,10 @@ def create_event():
         event_start_time = datetime.datetime.strptime(start_time, '%H:%M:%S')
         venue_close_time = datetime.datetime.strptime(utilities.convert_timedelta_to_string(venue['close_time'], '%H:%M:%S'), '%H:%M:%S')
         venue_open_time = datetime.datetime.strptime(utilities.convert_timedelta_to_string(venue['open_time'], '%H:%M:%S'), '%H:%M:%S')
+        #making sure event is being held during venue hours
         if event_start_time < venue_open_time or event_start_time >= venue_close_time:
             raise Exception("Your event is outside the venue hours")
-
+        #select all from events where venueid, event day, and start time match
         event_query = db.session.execute('''SELECT 
                                             * FROM events 
                                             WHERE venue_id = :venue_id 
@@ -336,6 +355,7 @@ def create_event():
                                             and start_time = :start_time''',
                                          {'venue_id': venue_id, 'event_day': event_day.strftime('%Y-%m-%d'), 'start_time': start_time})
         event = event_query.fetchone()
+        #making sure there is not an event already at that time
         if event is not None:
             raise Exception("An event already exists for that time.")
 
@@ -349,7 +369,7 @@ def create_event():
                                               'event_name': event_name, 'max_players': max_players})
         db.session.commit()
         new_event_id = new_event_query.lastrowid
-        add_user_to_event(new_event_id, user_id, participant_comment, num_guests)
+        add_user_to_event(new_event_id, user_id, participant_comment, num_guests) #calling add user to event for new event
         return jsonify(''), 201
     except Exception as e:
         return jsonify({"message": str(e)}), 500
@@ -359,12 +379,14 @@ def create_event():
 def remove_event(event_id):
     try:
         user = validate_token(request.headers.get('Authorization'))
+        #select all from events where event id matches
         event_query = db.session.execute('''SELECT * FROM events WHERE event_id = :event_id''', {'event_id': event_id})
-        event = dict(event_query.fetchone())
+        event = dict(event_query.fetchone()) #fetch the event
+        #user must have created event or be an admin to delete event
         if user['user_id'] == event['created_by'] or user['administrator'] == 1:
-            db.session.execute('''DELETE FROM events WHERE event_id = :event_id''', {'event_id': event_id})
+            db.session.execute('''DELETE FROM events WHERE event_id = :event_id''', {'event_id': event_id}) #delete the event
             db.session.commit()
-            db.session.execute('''DELETE FROM participants WHERE event_id = :event_id''', {'event_id': event_id})
+            db.session.execute('''DELETE FROM participants WHERE event_id = :event_id''', {'event_id': event_id}) #delete the participants from event
             db.session.commit()
         else:
             raise Exception('You do not have permission to do that.')
@@ -373,22 +395,25 @@ def remove_event(event_id):
         return jsonify({"message": str(e)}), 500
 
 @app.route("/venues/<venue_id>", methods =['DELETE'])
+#remove the event
 def remove_venue(venue_id):
     try:
         user = validate_token(request.headers.get('Authorization'))
+        #select event id from events where venueid matches
         events_at_venue = db.session.execute('''SELECT event_id FROM events where venue_id = :venue_id''', {'venue_id':venue_id})
-        events = events_at_venue.fetchall()
+        events = events_at_venue.fetchall() #fetch all events at venue
+        #user must be admin
         if user['administrator'] == 1:
             for i in events:
                 event = dict(i)
-                #deleting participants out of events out of the venue
+                #deleting participants out of events happening at the venue
                 db.session.execute('''DELETE FROM participants WHERE event_id =:event_id''', {'event_id':event_id})
                 db.session.commit()
-
+                #deleting the events that are happening at the venue
                 db.session.execute('''DELETE FROM events WHERE venue_id =:venue_id''', {'venue_id': venue_id})
                 db.session.commit()
+                #deleting the venue
                 db.session.execute('''DELETE FROM venues WHERE venue_id =:venue_id''', {'venue_id': venue_id})
-
                 db.session.commit()
             else:
                 raise Exception('You do not have permission to perform this action.')
@@ -398,16 +423,19 @@ def remove_venue(venue_id):
 
 
 @app.route("/register", methods=['POST'])
+#if someone wants to register to be a user
 def public_registration():
     try:
         content = request.json
         name = content['name']
         password = content['password']
         email = content['email']
+        #select email
         email_check_query = db.session.execute('''SELECT * FROM users WHERE lower(email) = lower(:email)''', {'email': email})
+        #if email is already in use, raise exception
         if email_check_query.fetchone() is not None:
             raise Exception('Email already in use')
-
+        #insert new user into users table
         db.session.execute('''INSERT INTO
                                 users (name, password, email)
                                 VALUES
@@ -420,9 +448,11 @@ def public_registration():
 
 
 @app.route("/my-events", methods=['GET'])
+#getting events a participant has signed up for
 def get_my_events():
     try:
         user = validate_token(request.headers.get('Authorization'))
+        #selecting all from events and venue name from participants, left join where event id matches, left join where venue id matches, where userid matches dict
         events_query = db.session.execute('''SELECT e.*, v.name as venue_name
                                             FROM participants p
                                             LEFT JOIN events e on e.event_id = p.event_id
@@ -446,10 +476,10 @@ def get_my_events():
 
 
 @app.route("/events/<event_id>/join", methods=['POST'])
+#participant joining an event
 def join_event(event_id):
     try:
         user = validate_token(request.headers.get('Authorization'))
-
         content = request.json
         num_guests = content['num_guests']
         participant_comment = content['participant_comment']
@@ -457,16 +487,17 @@ def join_event(event_id):
         #makes sure an admin account is being used to add a user to an event even if ids dont match
         if user_id != user['user_id']:
             is_admin(user)
-
+           #selecting all from participants where eventid and user id match
         p_query = db.session.execute('''SELECT
                                         p*
                                         from participants p
                                         WHERE p.event_id = :event_id
                                         and p.user_id =:user_id''', {'event_id':event_id, 'user_id':user_id})
-        participant = p_query.fetchone()
+        participant = p_query.fetchone() #fetch the participant
+        #if there is already a participant in event, raise an Exception
         if participant is not None:
             raise Exception('Already in game')
-
+         #selecting the event
         query = db.session.execute('''SELECT e.*, 
                                       (COUNT(distinct p.user_id) + SUM(p.num_guests)) AS num_players 
                                        FROM events e 
@@ -478,13 +509,14 @@ def join_event(event_id):
         event['num_players']= int(str(event['num_players']))
         if event['max_players'] - event['num_players'] <= 1 + num_guests:
             raise Exception('Not enough space')
-        add_user_to_event(event_id,user_id,participant_comment, num_guests)
+        add_user_to_event(event_id,user_id,participant_comment, num_guests #call add user to event
         return jsonify({'message': 'added'}), 201
     except Exception as e:
         return jsonify({'message': str(e)}), 500
 
 
 def add_user_to_event(event_id,user_id,participant_comment,num_guests):
+                          #inserting into participants
     db.session.execute('''INSERT INTO participants(event_id, user_id, comment, num_guests)
                             VALUES (:event_id, :user_id, :comment, :num_guests)''',
                        {'event_id':event_id, 'user_id':user_id,'comment':participant_comment, 'num_guests':num_guests})
