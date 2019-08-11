@@ -161,7 +161,7 @@ def create_token():
         response_dict = {'token': token.decode('UTF-8'), 'user': user}
         return jsonify(response_dict), 201
     except Exception as e:
-        return jsonify({"message": "error logging in"}), 500
+        return jsonify({"message": "error logging in"}), 401
 
 @app.route("/authenticate", methods=['GET'])
 def get_user():
@@ -169,7 +169,7 @@ def get_user():
         user = validate_token(request.headers.get('Authorization'))
         return jsonify(user), 200
     except Exception as e:
-        return jsonify({"message":str(e)}), 500
+        return jsonify({"message":str(e)}), 401
 
 #Returning a list of users from the database
 @app.route("/users", methods=['GET'])
@@ -417,6 +417,34 @@ def remove_venue(venue_id):
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
+@app.route("/users/<user_id>", methods =['DELETE'])
+def remove_user(user_id):
+    """
+    This function deletes a user, their events, and removes them as a participant in the events they've joined
+    :param user_id:
+    :return:
+    """
+    try:
+        user = validate_token(request.headers.get('Authorization'))
+        #select event id from events where created_by matches
+        events_at_venue = db.session.execute('''SELECT event_id FROM events where created_by = :created_by''', {'created_by':user_id})
+        events = events_at_venue.fetchall() #fetch all events
+        #user must be admin
+        is_admin(user)
+        for i in events:
+            event = dict(i)
+            #deleting participants out of events that were created by the user or the user is a participant
+            db.session.execute('''DELETE FROM participants WHERE event_id =:event_id or user_id = :user_id''', {'event_id': event['event_id'], 'user_id': user_id})
+            db.session.commit()
+            #deleting the events that were created by the user
+            db.session.execute('''DELETE FROM events WHERE created_by =:created_by''', {'created_by': user_id})
+            db.session.commit()
+            #deleting the user
+            db.session.execute('''DELETE FROM users WHERE user_id =:user_id''', {'user_id': user_id})
+            db.session.commit()
+        return jsonify({'message: ''deleted'}), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 
 @app.route("/register", methods=['POST'])
 #if someone wants to register to be a user
