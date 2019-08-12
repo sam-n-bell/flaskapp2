@@ -17,7 +17,6 @@ def create_token(user_dict):
 
 
 def decode_token(header):
-    print(header)
     if header.split(' ')[0] != 'Bearer':
         raise Exception('Auth header needed')
     decoded = jwt.decode(header.split(' ')[1], 'secret')
