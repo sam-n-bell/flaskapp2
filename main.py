@@ -10,7 +10,7 @@ from flask_cors import CORS
 
 
 app = Flask(__name__) #creating an instance of the Flask class and assigning it to the app variable
-CORS(app)  # asking to get data back
+CORS(app)  # lets the UI (JavaScript) make requests from flask
 app.config.from_object(config)  # tells flask the project ID and cloud SQL details
 db = SQLAlchemy(app)  # allows us to use SQL queries
 
@@ -86,8 +86,13 @@ def validate_token(header):
     decoded = auth.decode_token(header)
     return decoded  # user dict
 
-#If user is a admin, they have admin privileges
+
 def is_admin(user):
+    """
+    Returns True/False depending on if user dict is an administrator
+    :param user:
+    :return:
+    """
     if user['administrator'] == 1:
         return True
     else:
@@ -96,6 +101,11 @@ def is_admin(user):
 
 @app.route("/<venueId>/availability", methods=['GET'])
 def get_venue_availability(venueId):
+    """
+    Generates and returns a list of timeslots for a venue for events to be created from
+    :param venueId:
+    :return:
+    """
     try:
         # venueId is from the URL
         # when a query param is missing, it's None
@@ -154,7 +164,10 @@ def create_token():
     try:
         content = request.json #makes dictionary out of json request
         user = email_pass_validation(content['email'], content['password']) #calling validation to make sure email and password will work
-        token = auth.create_token(user) 
+        if 'password' in user:
+            del user['password']
+
+        token = auth.create_token(user)
         store_token(user, token)
         #https://github.com/jpadilla/pyjwt/issues/391 why to do UTF-8 decode here
         #turns the byte token into the correct String version so it can be used in the jsonify
@@ -165,6 +178,10 @@ def create_token():
 
 @app.route("/authenticate", methods=['GET'])
 def get_user():
+    """
+    Returns the user dict contained in a valid PyJWT token
+    :return:
+    """
     try:
         user = validate_token(request.headers.get('Authorization'))
         return jsonify(user), 200
@@ -174,6 +191,10 @@ def get_user():
 #Returning a list of users from the database
 @app.route("/users", methods=['GET'])
 def get_users():
+    """
+    Returns a list of users from the users table
+    :return:
+    """
     try:
         validate_token(request.headers.get('Authorization'))
         query = db.session.execute('SELECT * FROM users')
@@ -188,6 +209,10 @@ def get_users():
 #Adding a user to the database
 @app.route("/users", methods=['POST'])
 def add_user():
+    """
+    Creates a new user
+    :return:
+    """
     try:
         #validate token
         user = validate_token(request.headers.get('Authorization'))
@@ -210,6 +235,10 @@ def add_user():
 #Returning a list of all the venues
 @app.route("/venues", methods=['GET'])
 def get_venues():
+    """
+    Returns a list of venues
+    :return:
+    """
     try:
         validate_token(request.headers.get('Authorization'))
         query = db.session.execute('SELECT * FROM venues')
@@ -224,9 +253,13 @@ def get_venues():
     except Exception as e:
         return jsonify({"message": "Error getting list of venues "}), 500
 
-#  Creating a venue
+
 @app.route("/venues", methods=['POST'])
 def create_venue():
+    """
+    Creates a new venue
+    :return:
+    """
     try:
         user = validate_token(request.headers.get('Authorization'))
         is_admin(user)
@@ -242,6 +275,10 @@ def create_venue():
 @app.route("/events", methods=['GET'])
 #Returning events
 def get_events():
+    """
+    Returns a list of events. Uses some optional url query parameters
+    :return:
+    """
     try:
         validate_token(request.headers.get('Authorization'))
         venue_id = request.args.get('venueId')
@@ -317,6 +354,10 @@ def get_events():
 
 @app.route("/events", methods=['POST'])
 def create_event():
+    """
+    Cretes an event! nothing complicated to see here :)
+    :return:
+    """
     try:
         content = request.json
         venue_id = content['venue_id']
@@ -375,6 +416,11 @@ def create_event():
 
 @app.route("/events/<event_id>", methods=['DELETE'])
 def remove_event(event_id):
+    """
+    Deleting an event :(
+    :param event_id:
+    :return:
+    """
     try:
         user = validate_token(request.headers.get('Authorization'))
         #select all from events where event id matches
@@ -395,6 +441,11 @@ def remove_event(event_id):
 @app.route("/venues/<venue_id>", methods =['DELETE'])
 #remove the event
 def remove_venue(venue_id):
+    """
+    Deletes a venue + events at that venue + participants of those events.
+    :param venue_id:
+    :return:
+    """
     try:
         user = validate_token(request.headers.get('Authorization'))
         #select event id from events where venueid matches
@@ -464,6 +515,10 @@ def remove_user_from_event(event_id):
 @app.route("/register", methods=['POST'])
 #if someone wants to register to be a user
 def public_registration():
+    """
+    Creates a new non-admin user
+    :return:
+    """
     try:
         content = request.json
         name = content['name']
@@ -489,6 +544,10 @@ def public_registration():
 @app.route("/my-events", methods=['GET'])
 #getting events a participant has signed up for
 def get_my_events():
+    """
+    Returns list of events a user either made or joined based on the user_id in the authorization token
+    :return:
+    """
     try:
         user = validate_token(request.headers.get('Authorization'))
         #selecting all from events and venue name from participants, left join where event id matches, left join where venue id matches, where userid matches dict
@@ -517,6 +576,11 @@ def get_my_events():
 @app.route("/events/<event_id>/join", methods=['POST'])
 #participant joining an event
 def join_event(event_id):
+    """
+    Join an event as a participant
+    :param event_id:
+    :return:
+    """
     try:
         user = validate_token(request.headers.get('Authorization'))
         content = request.json
@@ -555,25 +619,21 @@ def join_event(event_id):
 
 
 def add_user_to_event(event_id,user_id,participant_comment,num_guests):
-                          #inserting into participants
+    """
+    Adds a user to an event as a participant
+    :param event_id:
+    :param user_id:
+    :param participant_comment:
+    :param num_guests:
+    :return:
+    """
     db.session.execute('''INSERT INTO participants(event_id, user_id, comment, num_guests)
                             VALUES (:event_id, :user_id, :comment, :num_guests)''',
                        {'event_id':event_id, 'user_id': user_id, 'comment': participant_comment, 'num_guests': num_guests})
     db.session.commit()
 
 
-
-# same of how to do insert with parameters
-# db.my_session.execute(
-#     "UPDATE client SET musicVol = :mv, messageVol = :ml",
-#     {'mv': music_volume, 'ml': message_volume}
-# )
-
-# get query params
-# user = request.args.get('user')
-
-
-
+# this is Google code i never explored the use of
 # Add an error handler. This is useful for debugging the live application,
 # however, you should disable the output of the exception for production
 # applications.
