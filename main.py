@@ -411,9 +411,9 @@ def remove_venue(venue_id):
             db.session.execute('''DELETE FROM events WHERE venue_id =:venue_id''', {'venue_id': venue_id})
             db.session.commit()
             #deleting the venue
-            db.session.execute('''DELETE FROM venues WHERE venue_id =:venue_id''', {'venue_id': venue_id})
-            db.session.commit()
-        return jsonify({'message: ''deleted'}), 200
+        db.session.execute('''DELETE FROM venues WHERE venue_id =:venue_id''', {'venue_id': venue_id})
+        db.session.commit()
+        return jsonify({'message': 'deleted'}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
@@ -439,10 +439,10 @@ def remove_user(user_id):
             #deleting the events that were created by the user
             db.session.execute('''DELETE FROM events WHERE created_by =:created_by''', {'created_by': user_id})
             db.session.commit()
-            #deleting the user
-            db.session.execute('''DELETE FROM users WHERE user_id =:user_id''', {'user_id': user_id})
-            db.session.commit()
-        return jsonify({'message: ''deleted'}), 200
+        # deleting the user
+        db.session.execute('''DELETE FROM users WHERE user_id = :user_id''', {'user_id': user_id})
+        db.session.commit()
+        return jsonify({'message': 'deleted'}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
@@ -513,10 +513,10 @@ def join_event(event_id):
             is_admin(user)
            #selecting all from participants where eventid and user id match
         p_query = db.session.execute('''SELECT
-                                        p*
+                                        p.*
                                         from participants p
                                         WHERE p.event_id = :event_id
-                                        and p.user_id =:user_id''', {'event_id':event_id, 'user_id':user_id})
+                                        and p.user_id = :user_id''', {'event_id': event_id, 'user_id': user_id})
         participant = p_query.fetchone() #fetch the participant
         #if there is already a participant in event, raise an Exception
         if participant is not None:
@@ -531,9 +531,9 @@ def join_event(event_id):
         if event['event_id'] is None:
             raise Exception('Event doesn\'t exist')
         event['num_players']= int(str(event['num_players']))
-        if event['max_players'] - event['num_players'] <= 1 + num_guests:
+        if event['max_players'] - event['num_players'] < 1 + num_guests:
             raise Exception('Not enough space')
-        add_user_to_event(event_id,user_id,participant_comment, num_guests) #call add user to event
+        add_user_to_event(event_id, user_id, participant_comment, num_guests) #call add user to event
         return jsonify({'message': 'added'}), 201
     except Exception as e:
         return jsonify({'message': str(e)}), 500
@@ -543,7 +543,7 @@ def add_user_to_event(event_id,user_id,participant_comment,num_guests):
                           #inserting into participants
     db.session.execute('''INSERT INTO participants(event_id, user_id, comment, num_guests)
                             VALUES (:event_id, :user_id, :comment, :num_guests)''',
-                       {'event_id':event_id, 'user_id':user_id,'comment':participant_comment, 'num_guests':num_guests})
+                       {'event_id':event_id, 'user_id': user_id, 'comment': participant_comment, 'num_guests': num_guests})
     db.session.commit()
 
 
