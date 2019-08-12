@@ -382,9 +382,9 @@ def remove_event(event_id):
         event = dict(event_query.fetchone()) #fetch the event
         #user must have created event or be an admin to delete event
         if user['user_id'] == event['created_by'] or is_admin(user):
-            db.session.execute('''DELETE FROM events WHERE event_id = :event_id''', {'event_id': event_id}) #delete the event
-            db.session.commit()
             db.session.execute('''DELETE FROM participants WHERE event_id = :event_id''', {'event_id': event_id}) #delete the participants from event
+            db.session.commit()
+            db.session.execute('''DELETE FROM events WHERE event_id = :event_id''', {'event_id': event_id}) #delete the event
             db.session.commit()
         else:
             raise Exception('You do not have permission to do that.')
@@ -443,6 +443,21 @@ def remove_user(user_id):
         db.session.execute('''DELETE FROM users WHERE user_id = :user_id''', {'user_id': user_id})
         db.session.commit()
         return jsonify({'message': 'deleted'}), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.route("/events/<event_id>/leave", methods =['DELETE'])
+def remove_user_from_event(event_id):
+    """
+    This function removes a user from an event
+    :param event_Id:
+    :return:
+    """
+    try:
+        user = validate_token(request.headers.get('Authorization'))
+        db.session.execute('''DELETE FROM participants WHERE event_id = :event_id and user_id = :user_id''', {'event_id': event_id, 'user_id': user['user_id']})
+        db.session.commit()
+        return jsonify({'message': 'removed from event'}), 200
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
